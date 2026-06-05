@@ -110,6 +110,13 @@ def main():
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(raw_data, f, ensure_ascii=False, indent=4)
 
+    s3_key = f"tiktok_creative_center/{today_str}/raw_topads_{today_str}.json"
+    try:
+        from src.utils.s3 import upload_json_to_s3
+        upload_json_to_s3(s3_key, raw_data)
+    except Exception as e:
+        print(f"[WARNING] Cannot upload data to S3: {e}")
+
     print("\n" + "=" * 55)
     print("Results:")
     total_apis = len(raw_data["all_responses"])

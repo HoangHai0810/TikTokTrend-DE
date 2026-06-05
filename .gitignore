@@ -1,0 +1,16 @@
+**/__pycache__/
+.env
+
+.venv/
+
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+
+data/raw/
+
+scripts/pipeline.log
+logs/
+
+.DS_Store
+*.pyc

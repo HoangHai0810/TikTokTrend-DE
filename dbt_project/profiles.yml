@@ -1,0 +1,12 @@
+tiktok_trend_profile:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5433
+      user: postgres
+      password: postgres
+      dbname: tiktok_trend
+      schema: public
+      threads: 1
