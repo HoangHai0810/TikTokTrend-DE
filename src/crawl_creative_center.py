@@ -27,6 +27,9 @@ def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict
         "all_responses": []
     }
 
+    collected_ads = []
+    ad_ids_seen = set()
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page    = browser.new_page(
@@ -38,7 +41,6 @@ def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict
         )
 
         def handle_response(response: Response):
-            # Check if the response URL contains "creative_radar_api"
             url = response.url
             if "creative_radar_api" not in url:
                 return
@@ -54,8 +56,13 @@ def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict
                     "data"     : data
                 })
 
-                if "top_ads/v2/list" in url and collected["top_ads_list"] is None:
-                    collected["top_ads_list"] = data
+                if "top_ads/v2/list" in url:
+                    materials = data.get("data", {}).get("materials", data.get("data", {}).get("list", []))
+                    for ad in materials:
+                        ad_id = ad.get("id")
+                        if ad_id and ad_id not in ad_ids_seen:
+                            ad_ids_seen.add(ad_id)
+                            collected_ads.append(ad)
                 elif "top_ads/v2/filters" in url and collected["filters"] is None:
                     collected["filters"] = data
 
@@ -65,14 +72,53 @@ def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict
         page.on("response", handle_response)
 
         target_url = build_url(period, country)
-        print(f"[INFO] URL: {target_url}")
+        print(f"[INFO] Navigating to URL: {target_url}")
         page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
 
-        print("[INFO] Waiting for 15 seconds for all APIs to load...")
+        print("[INFO] Waiting for 15 seconds for initial load...")
         time.sleep(15)
 
-        print(f"[INFO] URL: {page.url}")
-        print(f"[INFO] Title: {page.title()}")
+        # Pagination & Scrolling loop to collect more ads (3 pages ~ 60 ads)
+        pages_to_crawl = 3
+        for page_num in range(1, pages_to_crawl):
+            print(f"[INFO] Scrolling and attempting to load page {page_num + 1}...")
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3)
+
+            # Look for next pagination button
+            next_button_selectors = [
+                ".ant-pagination-next:not(.ant-pagination-disabled)",
+                "li.ant-pagination-next",
+                "button[aria-label='Next Page']"
+            ]
+            clicked = False
+            for selector in next_button_selectors:
+                try:
+                    locator = page.locator(selector)
+                    if locator.is_visible() and locator.is_enabled():
+                        locator.click()
+                        print(f"[INFO] Clicked next page button: {selector}")
+                        time.sleep(5)
+                        clicked = True
+                        break
+                except Exception:
+                    pass
+            
+            if not clicked:
+                print("[INFO] No next page button clicked. Performing extra scroll down.")
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3)
+
+        print(f"[INFO] Finished crawling. Total unique ads collected: {len(collected_ads)}")
+
+        # Construct final top_ads_list format expected by load.py
+        collected["top_ads_list"] = {
+            "code": 0,
+            "msg": "OK",
+            "data": {
+                "materials": collected_ads
+            }
+        }
 
         today_str = datetime.now().strftime("%Y-%m-%d")
         raw_dir = os.path.abspath(
