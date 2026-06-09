@@ -48,7 +48,7 @@ with DAG(
     crawl_task = DockerOperator(
         task_id       = "crawl_tiktok_top_ads",
         image         = IMAGE_NAME,
-        command       = "python src/crawl_creative_center.py --period 30 --country VN",
+        command       = "python src/crawl_creative_center.py --period 30 --countries VN,US,GB,CA,AU,NZ,SG,MY,PH,ID,HK,TW,TH",
         network_mode  = NETWORK_NAME,
         mounts        = MOUNTS,
         auto_remove   = "success",

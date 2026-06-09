@@ -1,13 +1,28 @@
 """
-Crawler TikTok Creative Center Top Ads (Vietnam)
+Crawler TikTok Creative Center Top Ads.
 """
 
 import os
 import json
 import time
 import argparse
+import sys
 from datetime import datetime
 from playwright.sync_api import sync_playwright, Response
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+
+def parse_country_codes(country_arg: str | None, countries_arg: str | None) -> list[str]:
+    raw_codes = countries_arg or country_arg or "VN"
+    countries = []
+    for code in raw_codes.split(","):
+        normalized = code.strip().upper()
+        if normalized and normalized not in countries:
+            countries.append(normalized)
+    return countries or ["VN"]
 
 
 def build_url(period: int, country: str) -> str:
@@ -18,6 +33,7 @@ def build_url(period: int, country: str) -> str:
 
 
 def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict:
+    country = country.upper()
     collected = {
         "crawled_at"   : datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "period"       : period,
@@ -62,6 +78,7 @@ def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict
                         ad_id = ad.get("id")
                         if ad_id and ad_id not in ad_ids_seen:
                             ad_ids_seen.add(ad_id)
+                            ad["country_code"] = country
                             collected_ads.append(ad)
                 elif "top_ads/v2/filters" in url and collected["filters"] is None:
                     collected["filters"] = data
@@ -131,12 +148,60 @@ def crawl_topads(period: int = 30, country: str = "VN", limit: int = 20) -> dict
     return collected
 
 
+def combine_country_results(country_results: list[dict]) -> dict:
+    all_ads = []
+    for result in country_results:
+        country_code = result.get("country_code")
+        materials = result.get("top_ads_list", {}).get("data", {}).get("materials", [])
+        for ad in materials:
+            ad["country_code"] = ad.get("country_code") or country_code
+            all_ads.append(ad)
+
+    return {
+        "crawled_at"     : datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "period"         : country_results[0].get("period") if country_results else None,
+        "countries"      : [result.get("country_code") for result in country_results],
+        "country_results": country_results,
+        "top_ads_list"   : {
+            "code": 0,
+            "msg" : "OK",
+            "data": {
+                "materials": all_ads
+            }
+        },
+        "filters"        : next((result.get("filters") for result in country_results if result.get("filters")), None),
+        "all_responses"  : [
+            response
+            for result in country_results
+            for response in result.get("all_responses", [])
+        ]
+    }
+
+
+def write_raw_json(raw_dir: str, today_str: str, raw_data: dict, suffix: str | None = None) -> str:
+    suffix_part = f"_{suffix}" if suffix else ""
+    output_file = os.path.join(raw_dir, f"raw_topads_{today_str}{suffix_part}.json")
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(raw_data, f, ensure_ascii=False, indent=4)
+    return output_file
+
+
+def upload_raw_json(s3_key: str, raw_data: dict):
+    try:
+        from src.utils.s3 import upload_json_to_s3
+        upload_json_to_s3(s3_key, raw_data)
+    except Exception as e:
+        print(f"[WARNING] Cannot upload data to S3: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="TikTok Creative Center Top Ads Crawler")
     parser.add_argument("--period",  type=int, default=30,  help="Number of days (7 or 30)")
-    parser.add_argument("--country", type=str, default="VN", help="Country code (VN, US, TH...)")
+    parser.add_argument("--country", type=str, default="VN", help="Country code or comma-separated country codes (VN,US,TH...)")
+    parser.add_argument("--countries", type=str, default=None, help="Comma-separated country codes to crawl (VN,US,TH...)")
     parser.add_argument("--limit",   type=int, default=20,  help="Number of ads per page")
     args = parser.parse_args()
+    countries = parse_country_codes(args.country, args.countries)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     raw_dir = os.path.abspath(
@@ -146,22 +211,26 @@ def main():
 
     print("=" * 55)
     print(f"TikTok Top Ads Crawler — {today_str}")
-    print(f"Period: {args.period} days | Country: {args.country}")
+    print(f"Period: {args.period} days | Countries: {', '.join(countries)}")
     print("=" * 55)
     print("[INFO] Capturing API responses from TikTok Creative Center...")
 
-    raw_data = crawl_topads(period=args.period, country=args.country, limit=args.limit)
+    country_results = []
+    for country in countries:
+        print("\n" + "-" * 55)
+        print(f"[INFO] Crawling country: {country}")
+        raw_country_data = crawl_topads(period=args.period, country=country, limit=args.limit)
+        country_results.append(raw_country_data)
 
-    output_file = os.path.join(raw_dir, f"raw_topads_{today_str}.json")
-    with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(raw_data, f, ensure_ascii=False, indent=4)
+        country_output_file = write_raw_json(raw_dir, today_str, raw_country_data, country)
+        country_s3_key = f"tiktok_creative_center/{today_str}/raw_topads_{today_str}_{country}.json"
+        upload_raw_json(country_s3_key, raw_country_data)
+        print(f"[INFO] Country raw JSON: {country_output_file}")
 
+    raw_data = country_results[0] if len(country_results) == 1 else combine_country_results(country_results)
+    output_file = write_raw_json(raw_dir, today_str, raw_data)
     s3_key = f"tiktok_creative_center/{today_str}/raw_topads_{today_str}.json"
-    try:
-        from src.utils.s3 import upload_json_to_s3
-        upload_json_to_s3(s3_key, raw_data)
-    except Exception as e:
-        print(f"[WARNING] Cannot upload data to S3: {e}")
+    upload_raw_json(s3_key, raw_data)
 
     print("\n" + "=" * 55)
     print("Results:")
@@ -175,8 +244,8 @@ def main():
         for i, ad in enumerate(ads_list[:3]):
             ad_id   = ad.get("id", "N/A")
             industr = ad.get("industry_key", ad.get("industry", "N/A"))
-            vv      = ad.get("video_info", {}).get("play_addr", {})
-            print(f"[{i+1}] id={ad_id} | industry={industr}")
+            country = ad.get("country_code", "N/A")
+            print(f"[{i+1}] country={country} | id={ad_id} | industry={industr}")
     else:
         print("Failed to retrieve Top Ads list")
 

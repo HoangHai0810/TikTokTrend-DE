@@ -18,7 +18,7 @@ ranked as (
         video_url_1080p,
         video_url_720p,
         crawled_at,
-        row_number() over (partition by ad_id order by crawled_at desc) as rn
+        row_number() over (partition by ad_id, country_code order by crawled_at desc) as rn
     from staging
 )
 

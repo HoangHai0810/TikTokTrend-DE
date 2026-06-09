@@ -154,8 +154,10 @@ Open MinIO Console at [http://localhost:9001](http://localhost:9001) (user: `min
 ./scripts/run_pipeline.sh
 ```
 
+By default the pipeline crawls `VN,US,GB,CA,AU,NZ,SG,MY,PH,ID,HK,TW,TH`. To change the country set, edit the `--countries` list in `scripts/run_pipeline.sh` or the Airflow DAG command.
+
 This executes all three steps in sequence:
-1. **Crawl** — Intercepts TikTok Creative Center API responses and collects Top Ads across multiple pages (~60+ ads)
+1. **Crawl** — Intercepts TikTok Creative Center API responses and collects Top Ads across multiple pages and countries
 2. **Load** — Reads raw JSON from MinIO, upserts into `public.stg_tiktok_topads`
 3. **Transform** — Runs `dbt run` to populate the `dim_ads` and `fact_ad_performance` tables
 
@@ -186,7 +188,7 @@ Open [http://localhost:8501](http://localhost:8501) to access the dashboard.
 | **🏷️ Industry & Hashtags** | Bar charts of top-10 industries and top-15 trending hashtags (auto-extracted from ad titles) |
 | **📽️ Video Player & Deep Dive** | Select any ad to play its video inline, view metadata, and see its historical engagement trend |
 
-**Sidebar filters:** Crawl date, industry, CTR range, minimum likes, and free-text search.
+**Sidebar filters:** Crawl date, country, industry, CTR range, minimum likes, and free-text search.
 
 > Industry and campaign objective names are loaded dynamically from `data/tiktok_filters.json` — the official TikTok Creative Center filter metadata — so labels are always accurate and never hardcoded.
 
@@ -198,10 +200,10 @@ Open [http://localhost:8501](http://localhost:8501) to access the dashboard.
 
 | Schema | Table / View | Type | Description |
 |--------|-------------|------|-------------|
-| `public` | `stg_tiktok_topads` | Table | Raw JSON data ingested from MinIO/S3. Contains `video_info` as JSONB. |
+| `public` | `stg_tiktok_topads` | Table | Raw JSON data ingested from MinIO/S3. Contains `video_info` as JSONB and `country_code` for multi-country analysis. |
 | `public_staging` | `stg_topads` | View (dbt) | Typed and renamed fields. Extracts `video_url_1080p`, `video_duration`, etc. from JSONB. |
-| `public_analytics` | `dim_ads` | Table (dbt) | **Dimension table.** Unique ads, de-duplicated to the latest crawl. |
-| `public_analytics` | `fact_ad_performance` | Table (dbt) | **Fact table.** Daily performance metrics (likes, CTR, cost level) per ad. |
+| `public_analytics` | `dim_ads` | Table (dbt) | **Dimension table.** Unique ad-country records, de-duplicated to the latest crawl. |
+| `public_analytics` | `fact_ad_performance` | Table (dbt) | **Fact table.** Daily performance metrics (likes, CTR, cost level) per ad and country. |
 
 > **The cleanest data for analysis lives in `public_analytics`.**
 
@@ -211,6 +213,7 @@ Open [http://localhost:8501](http://localhost:8501) to access the dashboard.
 | Column | Description |
 |--------|-------------|
 | `ad_id` | Unique TikTok ad identifier |
+| `country_code` | Country/nation where the ad was captured |
 | `ad_title` | Ad copy / title text (may contain hashtags) |
 | `brand_name` | Advertiser brand |
 | `industry_key` | TikTok industry category label |
@@ -221,7 +224,8 @@ Open [http://localhost:8501](http://localhost:8501) to access the dashboard.
 **`fact_ad_performance`**
 | Column | Description |
 |--------|-------------|
-| `ad_performance_key` | Surrogate key (MD5 of ad_id + crawled_date) |
+| `ad_performance_key` | Surrogate key (MD5 of ad_id + crawled_date + country_code) |
+| `country_code` | Country/nation where the ad was captured |
 | `crawled_date` | Date the ad was captured |
 | `like_count` | Total likes at time of crawl |
 | `ctr_rate` | Click-through rate |

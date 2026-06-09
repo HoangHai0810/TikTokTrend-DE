@@ -21,9 +21,9 @@ export PYTHONPATH=.
 
 echo ""
 echo "------------------------------------------------------------------------"
-echo "Step 1: Crawl Top Ads Vietnam data..."
+echo "Step 1: Crawl Top Ads multi-country data..."
 echo "------------------------------------------------------------------------"
-python3 src/crawl_creative_center.py --period 30 --country VN
+python3 src/crawl_creative_center.py --period 30 --countries VN,US,GB,CA,AU,NZ,SG,MY,PH,ID,HK,TW,TH
 
 echo ""
 echo "------------------------------------------------------------------------"

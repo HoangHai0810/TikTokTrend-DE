@@ -3,9 +3,10 @@ with staging as (
 )
 
 select
-    -- Tạo Surrogate Key làm khóa chính cho bảng fact dựa trên ad_id và ngày crawl
-    md5(concat(ad_id, '_', cast(crawled_date as varchar))) as ad_performance_key,
+    -- Surrogate key theo ad, ngày crawl và quốc gia để không ghi đè khi crawl nhiều nước.
+    md5(concat(ad_id, '_', cast(crawled_date as varchar), '_', country_code)) as ad_performance_key,
     ad_id,
+    country_code,
     crawled_date,
     cost_level,
     ctr_rate,

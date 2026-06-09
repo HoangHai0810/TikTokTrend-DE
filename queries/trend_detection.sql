@@ -11,6 +11,7 @@
 WITH extracted_hashtags AS (
     SELECT 
         ad_id,
+        country_code,
         UNNEST(REGEXP_MATCHES(ad_title, '#[a-zA-Z0-9_]+', 'g')) as hashtag
     FROM public_analytics.dim_ads
 ),
@@ -18,12 +19,14 @@ WITH extracted_hashtags AS (
 hashtag_performance AS (
     SELECT 
         LOWER(eh.hashtag) as clean_hashtag,
-        COUNT(DISTINCT eh.ad_id) as ad_count,
+        COUNT(DISTINCT (eh.ad_id, eh.country_code)) as ad_count,
         ROUND(AVG(fp.ctr_rate)::numeric, 4) as avg_ctr,
         SUM(fp.like_count) as total_likes,
         ROUND(AVG(fp.like_count)::numeric, 1) as avg_likes
     FROM extracted_hashtags eh
-    JOIN public_analytics.fact_ad_performance fp ON eh.ad_id = fp.ad_id
+    JOIN public_analytics.fact_ad_performance fp
+      ON eh.ad_id = fp.ad_id
+     AND eh.country_code = fp.country_code
     GROUP BY clean_hashtag
 )
 
@@ -45,14 +48,17 @@ LIMIT 20;
 -- có CTR cao nhất và thu hút nhiều tương tác nhất.
 
 SELECT 
+    da.country_code,
     da.industry_key,
-    COUNT(DISTINCT da.ad_id) as total_ads,
+    COUNT(DISTINCT (da.ad_id, da.country_code)) as total_ads,
     ROUND(AVG(fp.ctr_rate)::numeric, 4) as avg_ctr,
     SUM(fp.like_count) as total_likes,
     ROUND(AVG(fp.like_count)::numeric, 1) as avg_likes
 FROM public_analytics.dim_ads da
-JOIN public_analytics.fact_ad_performance fp ON da.ad_id = fp.ad_id
-GROUP BY da.industry_key
+JOIN public_analytics.fact_ad_performance fp
+  ON da.ad_id = fp.ad_id
+ AND da.country_code = fp.country_code
+GROUP BY da.country_code, da.industry_key
 ORDER BY total_ads DESC, avg_ctr DESC;
 
 
@@ -65,12 +71,13 @@ ORDER BY total_ads DESC, avg_ctr DESC;
 WITH daily_metrics AS (
     SELECT
         ad_id,
+        country_code,
         crawled_date,
         like_count,
         ctr_rate,
         -- Lấy số lượt thích của ngày hôm trước
         LAG(like_count, 1) OVER (
-            PARTITION BY ad_id 
+            PARTITION BY ad_id, country_code
             ORDER BY crawled_date ASC
         ) as prev_day_likes
     FROM public_analytics.fact_ad_performance
@@ -79,6 +86,7 @@ WITH daily_metrics AS (
 growth_calculation AS (
     SELECT
         ad_id,
+        country_code,
         crawled_date,
         like_count as current_likes,
         prev_day_likes,
@@ -91,6 +99,7 @@ growth_calculation AS (
 )
 
 SELECT 
+    da.country_code,
     da.ad_title,
     da.brand_name,
     gc.crawled_date,
@@ -99,5 +108,7 @@ SELECT
     gc.likes_added,
     gc.growth_percentage
 FROM growth_calculation gc
-JOIN public_analytics.dim_ads da ON gc.ad_id = da.ad_id
+JOIN public_analytics.dim_ads da
+  ON gc.ad_id = da.ad_id
+ AND gc.country_code = da.country_code
 ORDER BY gc.likes_added DESC, gc.growth_percentage DESC;
